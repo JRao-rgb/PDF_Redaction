@@ -61,26 +61,46 @@ doc = pymupdf.open(file_path)
 
 # open the pdf
 for page_num, page in enumerate(doc):
-    print(page_num)
-    if page_num != 43:
+    if page_num != 39:
         continue
     
     image_list = page.get_images()
 
     for image_index, img in enumerate(image_list, start=1): # enumerate the image list
+        # if image_index != 2:
+        #     continue
+        
         xref = img[0] # get the XREF of the image
         pix = pymupdf.Pixmap(doc, xref) # create a Pixmap
 
         if pix.n - pix.alpha > 3: # CMYK: convert to RGB first
             pix = pymupdf.Pixmap(pymupdf.csRGB, pix)
 
+        img_x = pix.x
+        img_y = pix.y
+        img_w = pix.width
+        img_h = pix.height
+        page_width = page.bound()[2]
+        page_height = page.bound()[3]
+        scale_x = page_width / img_w
+        scale_y = page_height / img_h
+        
+        print(image_index, img_x, img_y, page_width, page_height, img_w, img_h, scale_x, scale_y)
+
         shape = (pix.height, pix.width, pix.n)
         array_image = np.frombuffer(pix.samples, dtype=np.uint8).reshape(shape)
-        image_data = pytesseract.image_to_data(array_image, output_type='dict')
+        image_data = pytesseract.image_to_data(array_image[:,:,0], output_type='dict')
         
-        break
-    
-    break
+        for i in range(len(image_data['text'])):
+            cleaned_word = re.sub(r'[^a-zA-Z0-9]','',str(image_data['text'][i])).lower()
+            for name in names:
+                if cleaned_word == name.lower():
+                    x1 = img_x + image_data['left'][i]*scale_x
+                    x2 = img_x + (image_data['left'][i] + image_data['width'][i])*scale_x
+                    y1 = img_y + image_data['top'][i]*scale_y
+                    y2 = img_y + (image_data['top'][i] + image_data['height'][i])*scale_y
+                    print(image_data['text'][i], image_data['left'][i], image_data['width'][i], image_data['top'][i], image_data['height'][i])
+                    page.add_redact_annot(pymupdf.Rect(x1,y1,x2,y2), fill = [0,0,0])
     
     for name in names:
         instances = page.search_for(name)
@@ -97,3 +117,7 @@ doc.save('redacted_document.pdf')
 
 # Close the document
 doc.close()
+
+end_time = time.time()
+
+print(end_time - begin_time)
