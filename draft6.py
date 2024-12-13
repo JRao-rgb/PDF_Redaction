@@ -98,8 +98,8 @@ performances_summary.close()
 # display which file it will be writing the performance statistics to
 print("Thank you for using PDF_Redaction, written by your handsome BF.")
 print("ID-name pairs will written to '"+performance_summary_file_name+\
-      "', but PLEASE REFRAIN from checking this file as the code is running. If you and\
-          the code tries to access the file at the same time, it will cause problems :)")
+      "', but PLEASE REFRAIN from checking this file as the code is running. \
+      If you and the code tries to access the file at the same time, it will cause problems :)")
 
 #%% create the output folder, if it doesn't exist already
 if not os.path.isdir(output_folder):
