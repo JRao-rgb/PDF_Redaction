@@ -23,12 +23,10 @@ from openpyxl import load_workbook
 poppler_path = "C:\\Users\\jraos\\Downloads\\Release-24.08.0-0\\poppler-24.08.0\\Library\\bin"
 pytesseract.pytesseract.tesseract_cmd = "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
 
-# input_folder = "C:\\Users\\jraos\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\inputs\\"
-# input_folder = "C:\\Users\\jraos\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\inputs_single\\"
-input_folder = "C:\\Users\\jraos\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\inputs_problem\\"
-output_folder = "C:\\Users\\jraos\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\outputs_problem\\"
+input_folder = "C:\\Users\\jraos\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\inputs\\"
+output_folder = "C:\\Users\\jraos\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\outputs_new\\"
 
-os.chdir("C:\\Users\\jraos\\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction")
+english_ref_file = "C:\\Users\\jraos\\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\The_Oxford_3000.txt"
 
 # convenience parameters
 page_begin = 0 # the page that we start at, in case you want to restrict the redaction to only a few pages
@@ -49,21 +47,32 @@ minimum_name_length_for_spelling_mistake_tolerant_search = 5
 # the minimum length of a word needed for the spelling mistake-tolerant search to kick in.
 # this is necessary so super short nicknames like "ed" doesn't flag every three-letter word
 # with a "e" in it
+redaction_shrinkage = 0.9
+# shrink the size of the redaction rectangle so that we redact less of the original text
+# and don't accidentally redact text in a different line
+max_number_of_nicknames = 5
+# maximum number of nicknames to detect before we stop adding more nicknames
 
 # export parameters
 export_time_stamp = True
 export_page_count = True
 export_suspicious_pages_count = True
 export_redaction_count = True
+export_suspicions = True
 export_total_names_looked_for = True
 
 pymupdf.TOOLS.set_small_glyph_heights(on=True) # gets rid of text less aggressively than if set to "false"
 
+#%% create the output folder, if it doesn't exist already
+if not os.path.isdir(output_folder):
+    os.mkdir(output_folder)
+    
 # %% create "output" file, which contains confidence data, debug data, etc.
 
 all_files_begin_time = time.time()
 
 # deal with potentially duplicate files
+os.chdir(output_folder)
 performance_summary_file_name = "performance_summary"
 copy_nums = []
 found_copies = False
@@ -90,6 +99,7 @@ col = 2; row = 1
 if export_time_stamp:             worksheet.write(0,col, "Time Stamp (s)");  col += 1
 if export_page_count:             worksheet.write(0,col, "Page Count");      col += 1
 if export_suspicious_pages_count: worksheet.write(0,col, "Number of Suspicious Pages"); col += 1
+if export_suspicions:             worksheet.write(0,col, "Suspicions"); col += 1
 if export_redaction_count:        worksheet.write(0,col, "Redaction Count"); col += 1
 if export_total_names_looked_for: worksheet.write(0,col, "Names Looked For");
 
@@ -98,12 +108,15 @@ performances_summary.close()
 # display which file it will be writing the performance statistics to
 print("Thank you for using PDF_Redaction, written by your handsome BF.")
 print("ID-name pairs will written to '"+performance_summary_file_name+\
-      "', but PLEASE REFRAIN from checking this file as the code is running. \
-      If you and the code tries to access the file at the same time, it will cause problems :)")
+      "' in the output folder you specified, but PLEASE REFRAIN FROM CHECKING THIS FILE as the code is running. If you and the code tries to access the file at the same time, it will cause problems :)")
 
-#%% create the output folder, if it doesn't exist already
-if not os.path.isdir(output_folder):
-    os.mkdir(output_folder)
+#%% read in the English input file
+with open(english_ref_file) as file:
+    common_english_words_raw = file.read()
+common_english_words_raw = common_english_words_raw.split("\n")
+common_english_words = {}
+for word in common_english_words_raw:
+    common_english_words[re.sub(r'[^a-zA-Z0-9]', '', word).lower()] = 1
 
 #%% some helpful function definitions
 
@@ -134,6 +147,17 @@ def find_with_one_mistake(text, pattern):
         if mismatches <= spelling_mistake_tolerance:
             return i
     return -1
+
+def shrink_rectangle(rect):
+    rect = np.array(rect)
+    x1 = rect[0]
+    x2 = rect[2]
+    y1 = rect[1]
+    y2 = rect[3]
+    center_y = (y2 + y1)/2
+    y1_new = (y1 - center_y) * redaction_shrinkage + center_y
+    y2_new = (y2 - center_y) * redaction_shrinkage + center_y
+    return pymupdf.Rect(x1, y1_new, x2, y2_new)
 
 # %% obtain relevant text data (names, AAMCID, etc.)
 
@@ -190,16 +214,12 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
 
         new_data.append("UNABLE TO FIND")
         new_data.append(file_name[0:-4])
-        if export_time_stamp:             
-            new_data.append("FILE SKIPPED: NA")
-        if export_page_count:             
-           new_data.append("FILE SKIPPED: NA")
-        if export_suspicious_pages_count:             
-           new_data.append("FILE SKIPPED: NA")
-        if export_redaction_count:        
-            new_data.append("FILE SKIPPED: NA")
-        if export_total_names_looked_for: 
-            new_data.append("FILE SKIPPED: NA");
+        if export_time_stamp: new_data.append("FILE SKIPPED: NA")
+        if export_page_count: new_data.append("FILE SKIPPED: NA")
+        if export_suspicious_pages_count: new_data.append("FILE SKIPPED: NA")
+        if export_suspicions: new_data.append("NOT HAVING AN AAMC ID IS VERY SUSPICIOUS")
+        if export_redaction_count: new_data.append("FILE SKIPPED: NA")
+        if export_total_names_looked_for: new_data.append("FILE SKIPPED: NA");
         new_data = [new_data]
             
         ws = wb.active
@@ -310,6 +330,9 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
     names = list(set(names))
     while("" in names):
         names.remove("")
+        
+    # store the original length of "names" vector
+    original_number_of_names = len(names)
     
     # printing out what we found the names to be
     print("The following names (or elements of names) were found with raw text.",
@@ -441,7 +464,7 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                           image_data['height'][i]) * scale_y + trs_y
                     redaction_area = pymupdf.Rect(
                         x1, y1, x2, y2) * page.derotation_matrix
-                    page.add_redact_annot(redaction_area, fill=[0, 0, 0])
+                    page.add_redact_annot(shrink_rectangle(redaction_area), fill=[0, 0, 0])
                     redaction_count_per_page += 1
     
                     # detect if there is a word stuck between two "name" words
@@ -469,12 +492,20 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                                 re.sub(r'[^a-zA-Z0-9]', '', next_word).lower() == 'dr':
                                 break  # seeing if this word is a nickname if it's one of the above
     
+                            # don't add it as a nickname if it's already something we are searching for
+                            next_word_cleaned = re.sub(r'[^a-zA-Z0-9]', '', next_word).lower()
                             already_a_name = False
                             for name in names:
                                 cleaned_name = re.sub(r'[^a-zA-Z0-9]', '', name).lower()
-                                if find_with_one_mistake(re.sub(r'[^a-zA-Z0-9]', '', next_word).lower(), cleaned_name) != -1:
+                                if find_with_one_mistake(next_word_cleaned, cleaned_name) != -1:
                                     already_a_name = True; break  # skip it if it's already in the names (so something we are already looking for)
                             if already_a_name: break
+                        
+                            # don't add it if it's a common word
+                            if next_word in common_english_words: break
+    
+                            # don't add it if we have too many nicknames
+                            if len(names) > original_number_of_names + max_number_of_nicknames: break
     
                             two_words_over = same_line_data['text'][j+2]
                             for name in names:
@@ -490,7 +521,7 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                                 y1 = (same_line_data['top'][j+1] + ID_top_coordinate) * scale_y + trs_y
                                 y2 = (same_line_data['top'][j+1] + ID_top_coordinate + same_line_data['height'][j+1]) * scale_y + trs_y
                                 redaction_area = pymupdf.Rect(x1, y1, x2, y2) * page.derotation_matrix
-                                page.add_redact_annot(redaction_area, fill=[0, 0, 0])
+                                page.add_redact_annot(shrink_rectangle(redaction_area), fill=[0, 0, 0])
                                 redaction_count_per_page += 1
     
                                 # redact the second instance of the name
@@ -499,7 +530,7 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                                 y1 = (same_line_data['top'][j+2] + ID_top_coordinate) * scale_y + trs_y
                                 y2 = (same_line_data['top'][j+2] + ID_top_coordinate + same_line_data['height'][j+2]) * scale_y + trs_y
                                 redaction_area = pymupdf.Rect(x1, y1, x2, y2) * page.derotation_matrix
-                                page.add_redact_annot(redaction_area, fill=[0, 0, 0])
+                                page.add_redact_annot(shrink_rectangle(redaction_area), fill=[0, 0, 0])
                                 redaction_count_per_page += 1
     
                                 if len(re.sub(r'[^a-zA-Z0-9]', '', next_word)) <= 1:
@@ -539,7 +570,7 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                         continue
                     instances = page.search_for(word)
                     for inst in instances:
-                        page.add_redact_annot(inst, fill=[0, 0, 0])
+                        page.add_redact_annot(shrink_rectangle(inst), fill=[0, 0, 0])
                         redaction_count_per_page += 1
                     break;
     
@@ -581,7 +612,7 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                         and last_letter_of_the_next_word_is_a_comma_or_period:
                     instances = page.search_for(next_word)
                     for inst in instances:
-                        page.add_redact_annot(inst, fill=[0, 0, 0])
+                        page.add_redact_annot(shrink_rectangle(inst), fill=[0, 0, 0])
                         redaction_count_per_page += 1
                         
                 # basically, if the current word is a name, and the word after
@@ -596,12 +627,19 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
     
                 # make sure the current word isn't already a name before we spend
                 # effort redacting it
+                next_word_cleaned = re.sub(r'[^a-zA-Z0-9]', '', next_word).lower()
                 already_a_name = False
                 for name in names:
                     cleaned_name = re.sub(r'[^a-zA-Z0-9]', '', name).lower()
-                    if find_with_one_mistake(re.sub(r'[^a-zA-Z0-9]', '', next_word).lower(), cleaned_name) != -1:
+                    if find_with_one_mistake(next_word_cleaned, cleaned_name) != -1:
                         already_a_name = True; break  # skip it if it's already in the names (so something we are already looking for)
                 if already_a_name: break
+    
+                # don't add it if it's a common word
+                if next_word_cleaned in common_english_words: break
+    
+                # don't add it if we have too many nicknames
+                if len(names) > original_number_of_names + max_number_of_nicknames: break
     
                 for name in names:
                     # if cleaned_two_words_over.find(re.sub(r'[^a-zA-Z0-9]','',name).lower()) != -1 and contains_brackets:
@@ -613,7 +651,7 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                     print("\nText-based nickname finder found '"+next_word+"' to be a nickname. Added to list.")
                     instances = page.search_for(next_word)
                     for inst in instances:
-                        page.add_redact_annot(inst, fill=[0, 0, 0])
+                        page.add_redact_annot(shrink_rectangle(inst), fill=[0, 0, 0])
                         redaction_count_per_page += 1
                     break;
                 names.extend(nicknames)
@@ -630,7 +668,7 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
             instances = page.search_for(name)
             # Redact each instance of "Jane Doe" on the current page
             for inst in instances:
-                page.add_redact_annot(inst, fill=[0, 0, 0])
+                page.add_redact_annot(shrink_rectangle(inst), fill=[0, 0, 0])
                 redaction_count_per_page += 1
                     
         # Apply the redactions to the current page
@@ -666,9 +704,18 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
     end_time = time.time()
     all_files_time_elapsed = end_time
     
+    # print redaction statistics
     print("redacted document written to",  AAMCID +
           ".pdf. Time taken for this file:", end_time - begin_time, "s.")
 
+    # calculate suspicions
+    suspicions = ""
+    if number_of_suspicious_pages / (page_num + 1) > 0.5:
+        suspicions += "Too many pages with too few redactions; "
+    if len(names) == original_number_of_names + max_number_of_nicknames:
+        suspicions += "Too many nicknames added; "
+
+    # write the results to output file
     wb = load_workbook(performance_summary_file_name)
     new_data = []
 
@@ -677,9 +724,11 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
     if export_time_stamp:             
         new_data.append(round(all_files_time_elapsed-all_files_begin_time,2))
     if export_page_count:             
-       new_data.append(page_num + 1)
+        new_data.append(page_num + 1)
     if export_suspicious_pages_count:             
-       new_data.append(number_of_suspicious_pages)
+        new_data.append(number_of_suspicious_pages)
+    if export_suspicions:
+        new_data.append(suspicions)
     if export_redaction_count:        
         new_data.append(redaction_count)
     if export_total_names_looked_for: 
