@@ -23,8 +23,10 @@ from openpyxl import load_workbook
 poppler_path = "C:\\Users\\jraos\\Downloads\\Release-24.08.0-0\\poppler-24.08.0\\Library\\bin"
 pytesseract.pytesseract.tesseract_cmd = "C:\\Program Files\\Tesseract-OCR\\tesseract.exe"
 
-input_folder = "C:\\Users\\jraos\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\inputs\\"
-output_folder = "C:\\Users\\jraos\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\outputs_new\\"
+input_folder  = "C:\\Users\\jraos\\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\inputs\\"
+# input_folder = "C:\\Users\\jraos\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\inputs_single\\"
+input_folder  = "C:\\Users\\jraos\\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\inputs_problem\\"
+output_folder = "C:\\Users\\jraos\\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\outputs_problem\\"
 
 english_ref_file = "C:\\Users\\jraos\\OneDrive - Stanford\\Documents\\Helping Yurui\\PDF_redaction\\The_Oxford_3000.txt"
 
@@ -113,7 +115,7 @@ print("ID-name pairs will written to '"+performance_summary_file_name+\
 #%% read in the English input file
 with open(english_ref_file) as file:
     common_english_words_raw = file.read()
-common_english_words_raw = common_english_words_raw.split("\n")
+common_english_words_raw = common_english_words_raw.split()
 common_english_words = {}
 for word in common_english_words_raw:
     common_english_words[re.sub(r'[^a-zA-Z0-9]', '', word).lower()] = 1
@@ -159,6 +161,14 @@ def shrink_rectangle(rect):
     y2_new = (y2 - center_y) * redaction_shrinkage + center_y
     return pymupdf.Rect(x1, y1_new, x2, y2_new)
 
+def clean_list(my_list):
+    my_list = [x.lower() for x in my_list] # convert to lower case
+    my_list = list(set(my_list))
+    while("" in my_list):
+        my_list.remove("")
+    my_list = [x for x in my_list if len(x) > 1]
+    return my_list
+
 # %% obtain relevant text data (names, AAMCID, etc.)
 
 for file_num, file_name in enumerate(os.listdir(input_folder)):
@@ -168,6 +178,9 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
     file_path = input_folder + file_name
     
     begin_time = time.time()
+    
+    # our debug variable, "suspicions"
+    suspicions = ""
     
     # first, flatten all pdfs
     fillpdfs.flatten_pdf(file_path, file_path, as_images=False)
@@ -326,10 +339,7 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
     
     # cleaning up the names list so we have less values to iterate through / search through
     names.extend(identifying_info)
-    names = [x.lower() for x in names] # convert to lower case
-    names = list(set(names))
-    while("" in names):
-        names.remove("")
+    names = clean_list(names)
         
     # store the original length of "names" vector
     original_number_of_names = len(names)
@@ -508,11 +518,13 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                             if len(names) > original_number_of_names + max_number_of_nicknames: break
     
                             two_words_over = same_line_data['text'][j+2]
+                            cleaned_two_words_over = re.sub(r'[^a-zA-Z0-9]', '', two_words_over).lower()
+                            
                             for name in names:
                                 # looping through names again to see if the second word
                                 # finds anything
                                 cleaned_name = re.sub(r'[^a-zA-Z0-9]', '', name).lower()
-                                if find_with_one_mistake(two_words_over, cleaned_name) == -1:
+                                if find_with_one_mistake(cleaned_two_words_over, cleaned_name) == -1:
                                     continue  # go with the next name if the current one isn't it
     
                                 # redact the first instsance of the name
@@ -533,16 +545,14 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                                 page.add_redact_annot(shrink_rectangle(redaction_area), fill=[0, 0, 0])
                                 redaction_count_per_page += 1
     
-                                if len(re.sub(r'[^a-zA-Z0-9]', '', next_word)) <= 1:
+                                if len(next_word_cleaned) <= 1:
                                     continue  # skip appending it if it's only one letter
                                 # append the nicknames to the list of things to redact
-                                nicknames = [re.sub(r'[^a-zA-Z0-9]', '', next_word).lower()]
-                                print("\nImage-based nickname finder found '"+next_word+"' to be a nickname. Added to list.")
+                                nicknames = [next_word_cleaned]
+                                print("\nImage-based nickname finder found '"+next_word_cleaned+"' to be a nickname. Added to list.")
                                 break
                         names.extend(nicknames)
-                        names = list(set(names))
-                        while("" in names):
-                            names.remove("")
+                        names = clean_list(names)
     
         # clear the nicknames list
         nicknames = []
@@ -589,7 +599,7 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                 cleaned_name = re.sub(r'[^a-zA-Z0-9]', '', name).lower()
                 if find_with_one_mistake(cleaned_word, cleaned_name) == -1:
                     continue  # go to the next name if we can't find anything
-                    
+                
                 # begin initials detection. Start by searching what the next word is
                 next_word = page_text_by_words[min(i+1, len(page_text_by_words)-1)]
                 
@@ -624,7 +634,8 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
     
                 # uncomment if this takes out too many words because it thinks some random ass word is a nickname
                 # contains_brackets = any(punctuation in next_word for punctuation in "()[]{}\"\'“”‘’〈〉《》【】")
-    
+
+
                 # make sure the current word isn't already a name before we spend
                 # effort redacting it
                 next_word_cleaned = re.sub(r'[^a-zA-Z0-9]', '', next_word).lower()
@@ -642,22 +653,21 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                 if len(names) > original_number_of_names + max_number_of_nicknames: break
     
                 for name in names:
+                    cleaned_name = re.sub(r'[^a-zA-Z0-9]', '', name).lower()
                     # if cleaned_two_words_over.find(re.sub(r'[^a-zA-Z0-9]','',name).lower()) != -1 and contains_brackets:
-                    if cleaned_two_words_over != re.sub(r'[^a-zA-Z0-9]', '', name).lower() or \
+                    if find_with_one_mistake(cleaned_two_words_over, cleaned_name) == -1 or \
                         next_word_contains_1_letters == True or \
                         len(next_word) <= 1:
                         continue  # go to the next name if we don't find  anything
-                    nicknames =[re.sub(r'[^a-zA-Z0-9]', '', next_word).lower()]
-                    print("\nText-based nickname finder found '"+next_word+"' to be a nickname. Added to list.")
+                    nicknames =[next_word_cleaned]
+                    print("\nText-based nickname finder found '"+next_word_cleaned+"' to be a nickname. Added to list.")
                     instances = page.search_for(next_word)
                     for inst in instances:
                         page.add_redact_annot(shrink_rectangle(inst), fill=[0, 0, 0])
                         redaction_count_per_page += 1
                     break;
-                names.extend(nicknames)
-                names = list(set(names))
-                while("" in names):
-                    names.remove("")
+                names = clean_list(names)
+                break
              
         #  =========================================================================
         # last, scour the raw text for mentions of the name. This method has the
@@ -672,7 +682,10 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                 redaction_count_per_page += 1
                     
         # Apply the redactions to the current page
-        page.apply_redactions()
+        try:
+            page.apply_redactions()
+        except:
+            suspicions += "Unable to apply redactions on page " + str(page_num + 1) + ". Human operator presence requested.\n"
     
         # clean up the list
         sub_names = []
@@ -681,10 +694,7 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
                 sub_names.append(name_substring.lower())
         names.extend(sub_names)
         names.extend(nicknames)
-        names = [x.lower() for x in names] # convert to lower case
-        names = list(set(names))
-        while("" in names):
-            names.remove("")
+        names = clean_list(names)
             
         # calculate final redaction count
         redaction_count += redaction_count_per_page
@@ -709,11 +719,10 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
           ".pdf. Time taken for this file:", end_time - begin_time, "s.")
 
     # calculate suspicions
-    suspicions = ""
     if number_of_suspicious_pages / (page_num + 1) > 0.5:
-        suspicions += "Too many pages with too few redactions; "
+        suspicions += "Too many pages with too few redactions.\n"
     if len(names) == original_number_of_names + max_number_of_nicknames:
-        suspicions += "Too many nicknames added; "
+        suspicions += "Too many nicknames added.\n"
 
     # write the results to output file
     wb = load_workbook(performance_summary_file_name)
