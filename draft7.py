@@ -719,6 +719,7 @@ for file_num, file_name in enumerate(os.listdir(input_folder)):
     # first, determine if we have obtained an AAMCID:
     if len(AAMCID_list) == 0:
         AAMCID = "no ID found " + str(random.randint(1000,9999))
+        suspicions += "no AAMC ID found! \n"
     
     # create the file name and save it
     document_name = output_folder + AAMCID + ".pdf"
